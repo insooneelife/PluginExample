@@ -10,9 +10,6 @@
 
 void FPluginExampleModule::StartupModule()
 {
-    // changed
-    // changed2
-
 	// This code will execute after your module is loaded into memory; the exact timing is specified in the .uplugin file per-module
 
 	// Get the base directory of this plugin
