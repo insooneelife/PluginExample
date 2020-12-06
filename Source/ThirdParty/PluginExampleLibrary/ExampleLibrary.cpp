@@ -14,7 +14,7 @@
 #endif
 
 EXAMPLELIBRARY_EXPORT std::wstring ExampleLibraryFunction(const std::wstring& onnx_path)
-{
+{ 
     const size_t BZ = 10;
     const size_t T = 32;
 
