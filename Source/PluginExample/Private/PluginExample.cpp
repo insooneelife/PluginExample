@@ -10,30 +10,20 @@
 
 void FPluginExampleModule::StartupModule()
 {
-	// This code will execute after your module is loaded into memory; the exact timing is specified in the .uplugin file per-module
+    TArray<FString> DLLs =
+    {
+        TEXT("ExampleLibrary.dll")
+    };
 
-	// Get the base directory of this plugin
-	FString BaseDir = IPluginManager::Get().FindPlugin("PluginExample")->GetBaseDir();
+    for (FString DLLName : DLLs)
+    {
+        void* Handle  = SearchAndLoadDllsInDirectory(FPaths::ProjectPluginsDir(), DLLName);
 
-	// Add on the relative location of the third party dll and load it
-	FString LibraryPath;
-#if PLATFORM_WINDOWS
-	LibraryPath = FPaths::Combine(*BaseDir, TEXT("Binaries/ThirdParty/PluginExampleLibrary/Win64/ExampleLibrary.dll"));
-#elif PLATFORM_MAC
-    LibraryPath = FPaths::Combine(*BaseDir, TEXT("Source/ThirdParty/PluginExampleLibrary/Mac/Release/libExampleLibrary.dylib"));
-#endif // PLATFORM_WINDOWS
-
-	ExampleLibraryHandle = !LibraryPath.IsEmpty() ? FPlatformProcess::GetDllHandle(*LibraryPath) : nullptr;
-
-	if (ExampleLibraryHandle)
-	{
-		// Call the test function in the third party library that opens a message box
-		ExampleLibraryFunction();
-	}
-	else
-	{
-		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("ThirdPartyLibraryError", "Failed to load example third party library"));
-	}
+        if (Handle != nullptr)
+        {
+            DLLHandles.Add(Handle);
+        }
+    }
 }
 
 void FPluginExampleModule::ShutdownModule()
@@ -41,10 +31,54 @@ void FPluginExampleModule::ShutdownModule()
 	// This function may be called during shutdown to clean up your module.  For modules that support dynamic reloading,
 	// we call this function before unloading the module.
 
-	// Free the dll handle
-	FPlatformProcess::FreeDllHandle(ExampleLibraryHandle);
-	ExampleLibraryHandle = nullptr;
+    for (void* Handle : DLLHandles)
+    {
+        FPlatformProcess::FreeDllHandle(Handle);
+    }
+    DLLHandles.Empty();
 }
+
+void* FPluginExampleModule::SearchAndLoadDllsInDirectory(FString RootDirectoryPath, FString DllName)
+{
+    TArray<FString> DirectoriesToSkip;
+    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+    FLocalTimestampDirectoryVisitor Visitor(PlatformFile, DirectoriesToSkip, DirectoriesToSkip, false);
+    PlatformFile.IterateDirectory(*RootDirectoryPath, Visitor);
+
+    for (TMap<FString, FDateTime>::TIterator TimestampIt(Visitor.FileTimes); TimestampIt; ++TimestampIt)
+    {
+        const FString File = TimestampIt.Key();
+        const FString FilePath = FPaths::GetPath(File);
+        const FString FileName = FPaths::GetCleanFilename(File);
+
+        if (FileName.Compare(DllName) == 0)
+        {
+            FPlatformProcess::AddDllDirectory(*FilePath);
+
+            return FPlatformProcess::GetDllHandle(*File);
+        }
+    }
+
+    return nullptr;
+}
+
+
+void FPluginExampleModule::RunTestcase()
+{
+    FString ModelPath = FPaths::Combine(
+        FPaths::ProjectPluginsDir(),
+        FString(TEXT("PluginExample")),
+        FString(TEXT("Extras")),
+        FString(TEXT("models")),
+        FString(TEXT("model.onnx"))
+    );
+
+    std::wstring val = ExampleLibraryFunction(*ModelPath);
+    FString Msg = val.c_str();
+
+    UE_LOG(LogTemp, Warning, TEXT("%s"), *Msg);
+}
+
 
 #undef LOCTEXT_NAMESPACE
 	
