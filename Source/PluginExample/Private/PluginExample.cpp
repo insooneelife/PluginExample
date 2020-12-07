@@ -73,10 +73,10 @@ void FPluginExampleModule::RunTestcase()
         FString(TEXT("model.onnx"))
     );
 
-    std::wstring val = ExampleLibraryFunction(*ModelPath);
-    FString Msg = val.c_str();
+    const wchar_t* msg;
+    OnnxModelExploreTest::main(*ModelPath, &msg);
 
-    UE_LOG(LogTemp, Warning, TEXT("%s"), *Msg);
+    UE_LOG(LogTemp, Warning, TEXT("%s"), msg);
 }
 
 

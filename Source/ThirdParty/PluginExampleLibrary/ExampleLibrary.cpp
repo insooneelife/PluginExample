@@ -1,9 +1,9 @@
 #if defined _WIN32 || defined _WIN64
     #include <Windows.h>
-    #include <onnxruntime_cxx_api.h>
     #include <time.h>
     #include <sstream>
     #include <string>
+    #include <algorithm>
     #define EXAMPLELIBRARY_EXPORT __declspec(dllexport)
 #else
     #include <stdio.h>
@@ -13,109 +13,136 @@
     #define EXAMPLELIBRARY_EXPORT
 #endif
 
+#include "ExampleLibrary.h"
+
 EXAMPLELIBRARY_EXPORT std::wstring ExampleLibraryFunction(const std::wstring& onnx_path)
 { 
-    const size_t BZ = 10;
-    const size_t T = 32;
+    return L"";
+}
 
-    const size_t XDIM = 15;
-    const size_t YDIM = 138;
-    const OrtApi* g_ort = OrtGetApiBase()->GetApi(ORT_API_VERSION);
-    const size_t SEQ = (512 - 32);
-    const size_t N_EVAL = 32;
 
-    clock_t etime = 0;
+std::wstring OnnxModelExploreTest::print_shape(const std::vector<int64_t>& v)
+{
+    std::wstringstream ss(L"");
+    for (size_t i = 0; i < v.size() - 1; i++)
+        ss << v[i] << "x";
+    ss << v[v.size() - 1];
+    return ss.str();
+}
 
-    Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "test");
-    Ort::SessionOptions session_options;
+int OnnxModelExploreTest::calculate_product(const std::vector<int64_t>& v)
+{
+    int total = 1;
+    for (auto& i : v) total *= i;
+    return total;
+}
 
-    session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
-    Ort::Session session{ env, onnx_path.c_str(),  session_options };
-
-    size_t num_input_nodes = session.GetInputCount();
+std::vector<const char*> OnnxModelExploreTest::get_input_names(const Ort::Session& session)
+{
+    std::vector<const char*> input_names(session.GetInputCount());
     Ort::AllocatorWithDefaultOptions allocator;
 
-    std::vector<const char*> input_node_names(num_input_nodes);
-    std::vector<int64_t> input_node_dims;
-
-    std::wstringstream ss;
-    ss << "Number of inputs size : " << input_node_names.size() << std::endl;
-
-    for (size_t i = 0; i < num_input_nodes; ++i)
+    for (int i = 0; i < session.GetInputCount(); ++i)
     {
-        input_node_names[i] = session.GetInputName(i, allocator);
-        ss << "Input : " << i << " name : " << input_node_names[i] << std::endl;
+        input_names[i] = session.GetInputName(i, allocator);
+    }
+    return input_names;
+}
 
+std::vector<const char*> OnnxModelExploreTest::get_output_names(const Ort::Session& session)
+{
+    std::vector<const char*> output_names(session.GetOutputCount());
+    Ort::AllocatorWithDefaultOptions allocator;
+
+    for (int i = 0; i < session.GetOutputCount(); ++i)
+    {
+        output_names[i] = session.GetOutputName(i, allocator);
+    }
+    return output_names;
+}
+
+std::vector<std::vector<int64_t>> OnnxModelExploreTest::get_input_shapes(const Ort::Session& session)
+{
+    std::vector<std::vector<int64_t>> input_shapes(session.GetInputCount());
+
+    for (int i = 0; i < session.GetInputCount(); ++i)
+    {
         const Ort::TypeInfo& type_info = session.GetInputTypeInfo(i);
         const Ort::TensorTypeAndShapeInfo& tensor_info = type_info.GetTensorTypeAndShapeInfo();
-
-        size_t num_dims = tensor_info.GetDimensionsCount();
-        input_node_dims.resize(num_dims);
-
-        ss << "Input : " << i << " dims size : " << input_node_dims[i] << std::endl;
-
-        tensor_info.GetDimensions(input_node_dims.data(), input_node_dims.size());
-
-        for (size_t j = 0; j < num_dims; ++j)
-        {
-            ss << "Input : " << i << " dim " << j << "=" << input_node_dims[i] << std::endl;
-        }
+        input_shapes[i] = tensor_info.GetShape();
     }
 
-    std::array<const char*, 1> output_node_names = { "y_pred" };
-    std::vector<float> xs(XDIM * T * BZ);
-    std::vector<float> ys(YDIM * T * BZ);
-    std::array<int64_t, 3> xs_node_dims = { BZ, T, XDIM };
-    std::array<int64_t, 3> ys_node_dims = { BZ, T, YDIM };
+    return input_shapes;
+}
 
-    for (size_t n1 = 0; n1 < N_EVAL; ++n1)
+std::vector<std::vector<int64_t>> OnnxModelExploreTest::get_output_shapes(const Ort::Session& session)
+{
+    std::vector<std::vector<int64_t>> output_shapes(session.GetOutputCount());
+
+    for (int i = 0; i < session.GetOutputCount(); ++i)
     {
-        for (size_t n2 = 0; n2 < SEQ; ++n2)
-        {
-            for (size_t i = 0; i < T; ++i)
-            {
-                xs[i] = ((float)(rand() % 1000)) / 1000.0f - 0.5f;
-                ys[i] = ((float)(rand() % 1000)) / 1000.0f - 0.5f;
-            }
-
-            clock_t start = clock();
-            float* probs;
-
-            Ort::MemoryInfo memory_info =
-                Ort::MemoryInfo::CreateCpu(OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
-
-            std::array<Ort::Value, 2> inputs
-            {
-                Ort::Value::CreateTensor<float>(memory_info, xs.data(), xs.size(), xs_node_dims.data(), xs_node_dims.size()),
-                Ort::Value::CreateTensor<float>(memory_info, ys.data(), ys.size(), ys_node_dims.data(), ys_node_dims.size())
-            };
-
-            Ort::Value output{ nullptr };
-            session.Run(
-                Ort::RunOptions{ nullptr }, input_node_names.data(), inputs.data(), 2, output_node_names.data(), &output, 1);
-            probs = output.GetTensorMutableData<float>();
-
-            etime += clock() - start;
-
-            for (size_t c = 0; c < YDIM; ++c)
-            {
-                for (size_t t = 0; t < T; ++t)
-                {
-                    for (size_t bz = 0; bz < BZ; ++bz)
-                    {
-                        //int index = (BZ * T) *c + (BZ)*t + bz;
-                        int index = bz * (T * YDIM) + t * (YDIM)+c;
-                        float value = probs[index];
-                    }
-                }
-            }
-        }
-
-        ss << ((double)etime / CLOCKS_PER_SEC / (n1 + 1) / SEQ) << std::endl;
+        const Ort::TypeInfo& type_info = session.GetOutputTypeInfo(i);
+        const Ort::TensorTypeAndShapeInfo& tensor_info = type_info.GetTensorTypeAndShapeInfo();
+        output_shapes[i] = tensor_info.GetShape();
     }
 
-    ss << "Done!" << std::endl;
-    ss << ((double)etime / CLOCKS_PER_SEC / N_EVAL / SEQ) << std::endl;
+    return output_shapes;
+}
 
-    return ss.str();
+EXAMPLELIBRARY_EXPORT void OnnxModelExploreTest::main(const std::wstring& onnx_path, const wchar_t** msg)
+{
+    // onnxruntime setup
+    Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "example-model-explorer");
+    Ort::SessionOptions session_options;
+    Ort::Session session{ env, onnx_path.c_str(), session_options };  // access experimental components via the Experimental namespace
+
+    Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
+
+    std::vector<const char*> input_names = get_input_names(session);
+    std::vector<std::vector<int64_t> > input_shapes = get_input_shapes(session);
+
+    std::wstringstream ss;
+
+    ss << "Input Node Name/Shape (" << input_names.size() << "):" << std::endl;
+    for (size_t i = 0; i < input_names.size(); i++) 
+    {
+        ss << "\t" << input_names[i] << " : " << print_shape(input_shapes[i]) << std::endl;
+    }
+
+    std::vector<const char*> output_names = get_output_names(session);
+    std::vector<std::vector<int64_t> > output_shapes = get_output_shapes(session);
+
+    ss << "Output Node Name/Shape (" << output_names.size() << "):" << std::endl;
+    for (size_t i = 0; i < output_names.size(); i++) 
+    {
+        ss << "\t" << output_names[i] << " : " << print_shape(output_shapes[i]) << std::endl;
+    }
+
+    // Create a single Ort tensor of random numbers
+    auto input_shape = input_shapes[0];
+    int total_number_elements = calculate_product(input_shape);
+    std::vector<float> input_tensor_values(total_number_elements);
+    std::generate(input_tensor_values.begin(), input_tensor_values.end(), [&] { return rand() % 255; });  // generate random numbers in the range [0, 255]
+    std::vector<Ort::Value> input_tensors;
+
+    input_tensors.push_back(
+        Ort::Value::CreateTensor<float>(
+            memory_info, input_tensor_values.data(), input_tensor_values.size(), input_shape.data(), input_shape.size()));
+
+    // double-check the dimensions of the input tensor
+    ss << "\ninput_tensor shape: " << print_shape(input_tensors[0].GetTensorTypeAndShapeInfo().GetShape()) << std::endl;
+
+    // pass data through model
+    ss << "Running model...";
+    
+    std::vector<Ort::Value> output_tensors = session.Run(Ort::RunOptions{ nullptr },
+        input_names.data(), input_tensors.data(), input_names.size(), output_names.data(), output_names.size());
+
+    ss << "done" << std::endl;
+
+    // double-check the dimensions of the output tensors
+    // NOTE: the number of output tensors is equal to the number of output nodes specifed in the Run() call
+    ss << "output_tensor_shape: " << print_shape(output_tensors[0].GetTensorTypeAndShapeInfo().GetShape()) << std::endl;
+
+    *msg = ss.str().c_str();
 }
